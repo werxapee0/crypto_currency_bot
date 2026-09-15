@@ -31,7 +31,7 @@ async def get_fiat_rates() -> dict:
                         "EUR": get_rate("EUR"),
                         "CNY": get_rate("CNY"),
                         "UZS": get_rate("UZS"),
-                        "KZT": get_rate("KZT"),  # Казахстанский тенге
+                        "KZT": get_rate("KZT"),
                         "updated_at": datetime.now().strftime("%H:%M:%S")
                     }
                     fiat_cache["rates"] = rates
@@ -43,14 +43,17 @@ async def get_fiat_rates() -> dict:
 
 
 async def get_crypto_rates() -> dict:
-    """Получает курсы криптовалют (USD) с кэшированием."""
+    """
+    Получает курсы криптовалют через CryptoCompare API.
+    Надежный API, который не блокирует IP-адреса облачных серверов.
+    """
     if "rates" in crypto_cache:
         return crypto_cache["rates"]
 
-    url = "https://api.coingecko.com/api/v3/simple/price"
+    url = "https://min-api.cryptocompare.com/data/pricemulti"
     params = {
-        "ids": "bitcoin,ethereum,the-open-network,solana,tether",
-        "vs_currencies": "usd"
+        "fsyms": "BTC,ETH,TON,SOL,USDT",
+        "tsyms": "USD"
     }
     try:
         async with aiohttp.ClientSession() as session:
@@ -58,11 +61,11 @@ async def get_crypto_rates() -> dict:
                 if response.status == 200:
                     data = await response.json()
                     rates = {
-                        "BTC": data.get("bitcoin", {}).get("usd", 0.0),
-                        "ETH": data.get("ethereum", {}).get("usd", 0.0),
-                        "TON": data.get("the-open-network", {}).get("usd", 0.0),
-                        "SOL": data.get("solana", {}).get("usd", 0.0),
-                        "USDT": data.get("tether", {}).get("usd", 1.0),
+                        "BTC": float(data.get("BTC", {}).get("USD", 0.0)),
+                        "ETH": float(data.get("ETH", {}).get("USD", 0.0)),
+                        "TON": float(data.get("TON", {}).get("USD", 0.0)),
+                        "SOL": float(data.get("SOL", {}).get("USD", 0.0)),
+                        "USDT": float(data.get("USDT", {}).get("USD", 1.0)),
                         "updated_at": datetime.now().strftime("%H:%M:%S")
                     }
                     crypto_cache["rates"] = rates
