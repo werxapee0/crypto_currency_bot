@@ -47,6 +47,7 @@ SUPPORTED_LIST_TEXT = (
 
 
 def build_rates_for_base(base_currency: str, rates: dict) -> str:
+    """Динамически формирует текст с курсами относительно выбранной валюты."""
     base_in_rub = rates.get(base_currency, 1.0)
     time_str = rates.get("updated_at", "только что")
     name, flag = CURRENCY_NAMES.get(base_currency, (base_currency, "💰"))
@@ -64,6 +65,7 @@ def build_rates_for_base(base_currency: str, rates: dict) -> str:
         if base_in_rub == 0 or curr_in_rub == 0:
             continue
 
+        # Сколько единиц base_currency стоит 1 единица curr_code
         rate = curr_in_rub / base_in_rub
 
         if base_currency == "UZS":
@@ -71,6 +73,11 @@ def build_rates_for_base(base_currency: str, rates: dict) -> str:
                 lines.append(f"• 1 {curr_code} = `{rate:,.2f} UZS`")
             else:
                 lines.append(f"• 1 {curr_code} = `{rate:,.0f} UZS`")
+        elif base_currency == "KZT":
+            if curr_code == "UZS":
+                lines.append(f"• 10 000 UZS = `{(rate * 10000):,.2f} KZT`")
+            else:
+                lines.append(f"• 1 {curr_code} = `{rate:,.2f} KZT`")
         elif base_currency in ("USD", "EUR", "CNY"):
             if curr_code == "UZS":
                 lines.append(f"• 10 000 UZS = `{(rate * 10000):.3f} {base_currency}`")
@@ -81,6 +88,8 @@ def build_rates_for_base(base_currency: str, rates: dict) -> str:
                 lines.append(f"• 10 000 UZS = `{(rate * 10000):.2f} ₽`")
             else:
                 lines.append(f"• 1 {curr_code} = `{rate:.2f} ₽`")
+        else:
+            lines.append(f"• 1 {curr_code} = `{rate:,.2f} {base_currency}`")
 
     return "\n".join(lines)
 
