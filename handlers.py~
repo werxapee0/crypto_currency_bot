@@ -1,0 +1,309 @@
+import re
+from aiogram import Router, F
+from aiogram.filters import CommandStart
+from aiogram.types import Message, CallbackQuery
+from keyboards import (
+    get_main_keyboard,
+    get_fiat_choice_keyboard,
+    get_currency_details_keyboard,
+    get_crypto_keyboard,
+    get_back_to_menu_keyboard
+)
+from services import get_fiat_rates, get_crypto_rates
+
+router = Router()
+
+CURRENCY_NAMES = {
+    "UZS": ("Узбекскому суму", "🇺🇿"),
+    "RUB": ("Российскому рублю", "🇷🇺"),
+    "USD": ("Доллару США", "🇺🇸"),
+    "CNY": ("Китайскому юаню", "🇨🇳"),
+    "EUR": ("Евро", "🇪🇺"),
+    "KZT": ("Казахстанскому тенге", "🇰🇿"),
+}
+
+# Словарь синонимов и сленга
+ALIASES = {
+    # Фиатные
+    "СУМ": "UZS", "СУММ": "UZS", "UZS": "UZS", "SOM": "UZS", "SO'M": "UZS", "SO`M": "UZS",
+    "ДОЛ": "USD", "USD": "USD", "ДОЛЛАР": "USD", "ДОЛЛАРОВ": "USD", "ДОЛЛАРА": "USD", "BAKS": "USD", "БАКС": "USD", "$": "USD",
+    "РУБ": "RUB", "RUB": "RUB", "РУБЛЬ": "RUB", "РУБЛЕЙ": "RUB", "РУБЛЯ": "RUB", "₽": "RUB",
+    "ЕВР": "EUR", "EUR": "EUR", "ЕВРО": "EUR", "€": "EUR",
+    "ЮАН": "CNY", "CNY": "CNY", "ЮАНЬ": "CNY", "ЮАНЕЙ": "CNY", "ЮАНЯ": "CNY", "RMB": "CNY", "¥": "CNY",
+    "ТЕНГЕ": "KZT", "KZT": "KZT", "ТГ": "KZT",
+    # Крипта
+    "BTC": "BTC", "БИТКОИН": "BTC", "БИТОК": "BTC", "BITCOIN": "BTC",
+    "ETH": "ETH", "ЭФИР": "ETH", "ЭФИРИУМ": "ETH", "ETHEREUM": "ETH",
+    "TON": "TON", "ТОН": "TON",
+    "SOL": "SOL", "СОЛАНА": "SOL", "SOLANA": "SOL",
+    "USDT": "USDT", "ТЕЗЕР": "USDT", "ЮСДТ": "USDT", "TETHER": "USDT"
+}
+
+SUPPORTED_LIST_TEXT = (
+    "📋 *Поддерживаемые валюты:*\n"
+    "• *Фиат:* `USD`, `EUR`, `RUB`, `UZS` (сум), `CNY` (юань), `KZT` (тенге)\n"
+    "• *Крипта:* `BTC`, `ETH`, `TON`, `SOL`, `USDT`"
+)
+
+
+def build_rates_for_base(base_currency: str, rates: dict) -> str:
+    base_in_rub = rates.get(base_currency, 1.0)
+    time_str = rates.get("updated_at", "только что")
+    name, flag = CURRENCY_NAMES.get(base_currency, (base_currency, "💰"))
+
+    lines = [
+        f"{flag} *Курсы валют к {name} ({base_currency})*",
+        f"🕒 _Обновлено: {time_str}_\n"
+    ]
+
+    for curr_code in ["USD", "EUR", "CNY", "RUB", "UZS", "KZT"]:
+        if curr_code == base_currency:
+            continue
+
+        curr_in_rub = rates.get(curr_code, 0.0)
+        if base_in_rub == 0 or curr_in_rub == 0:
+            continue
+
+        rate = curr_in_rub / base_in_rub
+
+        if base_currency == "UZS":
+            if curr_code == "RUB":
+                lines.append(f"• 1 {curr_code} = `{rate:,.2f} UZS`")
+            else:
+                lines.append(f"• 1 {curr_code} = `{rate:,.0f} UZS`")
+        elif base_currency in ("USD", "EUR", "CNY"):
+            if curr_code == "UZS":
+                lines.append(f"• 10 000 UZS = `{(rate * 10000):.3f} {base_currency}`")
+            else:
+                lines.append(f"• 1 {curr_code} = `{rate:.4f} {base_currency}`")
+        elif base_currency == "RUB":
+            if curr_code == "UZS":
+                lines.append(f"• 10 000 UZS = `{(rate * 10000):.2f} ₽`")
+            else:
+                lines.append(f"• 1 {curr_code} = `{rate:.2f} ₽`")
+
+    return "\n".join(lines)
+
+
+def build_crypto_text(crypto: dict) -> str:
+    time_str = crypto.get("updated_at", "только что")
+    return (
+        f"🪙 *Курсы криптовалют (USD)*\n"
+        f"🕒 _Обновлено: {time_str}_\n\n"
+        f"🟠 *Bitcoin (BTC)*: `${crypto.get('BTC', 0):,.2f}`\n"
+        f"🔷 *Ethereum (ETH)*: `${crypto.get('ETH', 0):,.2f}`\n"
+        f"💎 *TON (Telegram)*: `${crypto.get('TON', 0):,.2f}`\n"
+        f"🟣 *Solana (SOL)*: `${crypto.get('SOL', 0):,.2f}`\n"
+        f"🟢 *Tether (USDT)*: `${crypto.get('USDT', 1.0):,.3f}`\n"
+    )
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message):
+    text = (
+        f"👋 Привет, *{message.from_user.first_name}*!\n\n"
+        "Я финансовый бот-помощник.\n"
+        "📊 Показываю актуальные курсы валют и криптовалют.\n"
+        "🧮 Умею мгновенно конвертировать валюты прямо в чате!\n\n"
+        "Выберите нужный раздел в меню ниже 👇"
+    )
+    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "main_menu")
+async def cb_main_menu(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        await callback.message.edit_text("Главное меню:", reply_markup=get_main_keyboard())
+    except Exception:
+        # Если старое сообщение нельзя редактировать — отправляем новое
+        await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard())
+
+
+@router.callback_query(F.data == "fiat_menu")
+async def cb_fiat_menu(callback: CallbackQuery):
+    await callback.answer()
+    text = "💱 *Выберите валюту, к которой хотите посмотреть курсы:*"
+    await callback.message.edit_text(text, reply_markup=get_fiat_choice_keyboard(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("fiat_view:"))
+async def cb_fiat_view(callback: CallbackQuery):
+    base_currency = callback.data.split(":")[1]
+    rates = await get_fiat_rates()
+
+    if not rates:
+        await callback.answer("⚠️ Не удалось загрузить курсы.", show_alert=True)
+        return
+
+    await callback.answer()
+    text = build_rates_for_base(base_currency, rates)
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_currency_details_keyboard(base_currency),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data.startswith("fiat_refresh:"))
+async def cb_fiat_refresh(callback: CallbackQuery):
+    base_currency = callback.data.split(":")[1]
+    rates = await get_fiat_rates()
+
+    if not rates:
+        await callback.answer("⚠️ Ошибка обновления данных.", show_alert=True)
+        return
+
+    text = build_rates_for_base(base_currency, rates)
+    await callback.answer("🔄 Курс обновлен!")
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_currency_details_keyboard(base_currency),
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.in_({"rates_crypto", "refresh_crypto"}))
+async def cb_rates_crypto(callback: CallbackQuery):
+    crypto = await get_crypto_rates()
+    if not crypto:
+        await callback.answer("⚠️ Не удалось загрузить криптовалюты.", show_alert=True)
+        return
+
+    text = build_crypto_text(crypto)
+    if callback.data == "refresh_crypto":
+        await callback.answer("🔄 Курсы обновлены!")
+        try:
+            await callback.message.edit_text(text, reply_markup=get_crypto_keyboard(), parse_mode="Markdown")
+        except Exception:
+            pass
+    else:
+        await callback.answer()
+        await callback.message.edit_text(text, reply_markup=get_crypto_keyboard(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data == "calc_help")
+async def cb_calc_help(callback: CallbackQuery):
+    await callback.answer()
+    text = (
+        "🧮 *Умный калькулятор валют:*\n\n"
+        "Отправь в чат сообщение вида:\n"
+        "`[сумма] [из валюты] в [в валюту]`\n\n"
+        "💡 *Примеры:*\n"
+        "• `100 usd в uzs` (доллары в сумы)\n"
+        "• `500 cny в rub` (юани в рубли)\n"
+        "• `250000 сум в usd` (сумы в доллары)\n"
+        "• `10 ton в cny` (TON в юани)\n"
+        "• `50 usdt в uzs` (USDT в сумы)\n\n"
+        f"{SUPPORTED_LIST_TEXT}"
+    )
+    await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_back_to_menu_keyboard())
+
+
+@router.message(F.text)
+async def convert_handler(message: Message):
+    """Конвертер с полной защитой от некорректного ввода."""
+    text = message.text.strip()
+    has_separator = re.search(r"\b(в|to|in)\b", text, re.IGNORECASE)
+
+    pattern = r"^(\S+)\s+(\S+)\s+(?:в|to|in)\s+(\S+)$"
+    match = re.match(pattern, text, re.IGNORECASE)
+
+    if not match:
+        if has_separator:
+            await message.answer(
+                "⚠️ *Неверный формат команды!*\n\n"
+                "Используйте формат: `100 usd в uzs`\n"
+                "Нажмите «🧮 Как пользоваться калькулятором» в меню для справки.",
+                parse_mode="Markdown",
+                reply_markup=get_back_to_menu_keyboard()
+            )
+        return
+
+    raw_amount, raw_from, raw_to = match.group(1), match.group(2).upper(), match.group(3).upper()
+
+    # 1. Валидация числа
+    try:
+        amount = float(raw_amount.replace(",", "."))
+        if amount <= 0:
+            await message.answer(
+                "⚠️ Сумма должна быть больше нуля!",
+                reply_markup=get_back_to_menu_keyboard()
+            )
+            return
+        if amount > 1_000_000_000_000:
+            await message.answer(
+                "⚠️ Слишком большая сумма для расчета.",
+                reply_markup=get_back_to_menu_keyboard()
+            )
+            return
+    except ValueError:
+        await message.answer(
+            f"⚠️ `{raw_amount}` не является корректным числом.",
+            parse_mode="Markdown",
+            reply_markup=get_back_to_menu_keyboard()
+        )
+        return
+
+    # 2. Поиск валют
+    from_curr = ALIASES.get(raw_from)
+    to_curr = ALIASES.get(raw_to)
+
+    unknown = []
+    if not from_curr:
+        unknown.append(f"«{raw_from}»")
+    if not to_curr:
+        unknown.append(f"«{raw_to}»")
+
+    if unknown:
+        await message.answer(
+            f"⚠️ Не удалось распознать: {', '.join(unknown)}\n\n"
+            f"{SUPPORTED_LIST_TEXT}",
+            parse_mode="Markdown",
+            reply_markup=get_back_to_menu_keyboard()
+        )
+        return
+
+    # 3. Загрузка курсов
+    fiat_rates = await get_fiat_rates()
+    crypto_rates = await get_crypto_rates()
+
+    def to_usd_rate(code: str) -> float | None:
+        if code in crypto_rates:
+            return crypto_rates[code]
+        if code == "USD":
+            return 1.0
+        if code in fiat_rates and fiat_rates.get("USD"):
+            return fiat_rates[code] / fiat_rates["USD"]
+        return None
+
+    rate_from = to_usd_rate(from_curr)
+    rate_to = to_usd_rate(to_curr)
+
+    if not rate_from or not rate_to:
+        await message.answer(
+            "⚠️ Временная ошибка сервера курсов. Попробуйте через 1-2 минуты.",
+            reply_markup=get_back_to_menu_keyboard()
+        )
+        return
+
+    # 4. Расчет
+    amount_in_usd = amount * rate_from
+    result = amount_in_usd / rate_to
+
+    def fmt(val: float, code: str) -> str:
+        if code in ("UZS", "KZT"):
+            return f"{val:,.0f}"
+        if code in ("BTC", "ETH"):
+            return f"{val:.6f}" if val < 1 else f"{val:,.4f}"
+        return f"{val:,.2f}"
+
+    await message.answer(
+        f"💱 *Результат конвертации:*\n"
+        f"`{fmt(amount, from_curr)} {from_curr}` = *{fmt(result, to_curr)} {to_curr}*",
+        parse_mode="Markdown",
+        reply_markup=get_back_to_menu_keyboard()
+    )
