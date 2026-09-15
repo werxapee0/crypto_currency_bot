@@ -48,5 +48,5 @@
 
 ### 1. Клонировать репозиторий
 ```bash
-git clone https://github.com/ТВОЙ-ЛОГИН/crypto_currency_bot.git
+git clone https://github.com/werxapee0/crypto_currency_bot.git
 cd crypto_currency_bot
