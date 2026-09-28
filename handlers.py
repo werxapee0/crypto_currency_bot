@@ -103,7 +103,7 @@ def build_crypto_text(crypto: dict) -> str:
         f"🔷 *Ethereum (ETH)*: `${crypto.get('ETH', 0):,.2f}`\n"
         f"💎 *TON (Telegram)*: `${crypto.get('TON', 0):,.2f}`\n"
         f"🟣 *Solana (SOL)*: `${crypto.get('SOL', 0):,.2f}`\n"
-        f"🟢 *Tether (USDT)*: `${crypto.get('USDT', 1.0):,.3f}`\n"
+        f"🟢 *Tether (USDT)*: `${crypto.get('USDT', 1.0):,.2f}`\n"
     )
 
 
